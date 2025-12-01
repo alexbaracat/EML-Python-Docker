@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Email Metadata Reader</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="static/index.css">
+</head>
+<body>
+  <h1>EML File Reader</h1>
+  <p>Drag & drop a <code>.eml</code> file below to view its raw code and visual rendering.</p>
+
+  <form id="upload-form" enctype="multipart/form-data">
+    <div id="drop-zone">
+      <strong>Drop .eml file here</strong><br>
+      <span>or click to browse</span>
+      <input id="file-input" type="file" name="file" accept=".eml,message/rfc822" required>
+    </div>
+  </form>
+
+  <div id="status"></div>
+  <div id="error"></div>
+  <div id="loading" style="display:none; text-align: center; margin-top: 1rem;">
+    <div style="display: inline-block;">
+      <div style="border: 4px solid #f3f3f3; border-top: 4px solid #007bff; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite;"></div>
+      <p style="margin-top: 0.5rem; color: #555;">Processing email...</p>
+    </div>
+  </div>
+  <style>
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+
+  <div id="results-container" style="display:none;">
+    <div id="tabs">
+      <button class="tab-btn active" data-tab="preview">Preview</button>
+      <button class="tab-btn" data-tab="code">Raw Code</button>
+    </div>
+
+    <div id="preview-tab" class="tab-content">
+      <div class="two-column">
+        <div class="left-column">
+          <h2>📧 Email Headers</h2>
+          <div id="preview-headers-container"></div>
+        </div>
+        <div class="right-column">
+          <h2>📨 Email Content</h2>
+          <div id="preview-body-container"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="code-tab" class="tab-content" style="display:none;">
+      <pre id="code-display"></pre>
+    </div>
+  </div>
+
+  <script>
+    function initializeApp() {
+      // Drag and drop functionality with AJAX upload
+      const dropZone = document.getElementById('drop-zone');
+      const fileInput = document.getElementById('file-input');
+      const uploadForm = document.getElementById('upload-form');
+      const statusEl = document.getElementById('status');
+      const errorEl = document.getElementById('error');
+      const loadingEl = document.getElementById('loading');
+      const resultsContainer = document.getElementById('results-container');
+
+      function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+
+      ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, preventDefaults, false);
+      });
+
+      ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, () => dropZone.classList.add('highlight'), false);
+      });
+
+      ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, () => dropZone.classList.remove('highlight'), false);
+      });
+
+      dropZone.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        fileInput.click();
+      });
+
+      fileInput.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+
+      async function uploadFile(file) {
+        if (!file.name.endsWith('.eml')) {
+          errorEl.textContent = 'Please upload a .eml file';
+          statusEl.textContent = '';
+          return;
+        }
+
+        statusEl.textContent = '';
+        errorEl.textContent = '';
+        loadingEl.style.display = 'block';
+        resultsContainer.style.display = 'none';
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+          const response = await fetch('/upload-api', {
+            method: 'POST',
+            body: formData
+          });
+
+          if (!response.ok) {
+            throw new Error('Server error: ' + response.status);
+          }
+
+          const data = await response.json();
+          
+          if (data.error) {
+            errorEl.textContent = 'Error: ' + data.error;
+            loadingEl.style.display = 'none';
+            return;
+          }
+
+          // Populate the results
+          renderResults(data);
+          loadingEl.style.display = 'none';
+          resultsContainer.style.display = 'block';
+          statusEl.textContent = '';
+          errorEl.textContent = '';
+        } catch (err) {
+          loadingEl.style.display = 'none';
+          errorEl.textContent = 'Error uploading file: ' + err.message;
+        }
+      }
+
+      function renderResults(data) {
+        // Render headers
+        let headersHtml = '<div class="headers-grid">';
+        for (const [key, value] of Object.entries(data.key_headers)) {
+          headersHtml += `<div class="header-item"><strong>${key}:</strong><span>${escapeHtml(value)}</span></div>`;
+        }
+        headersHtml += '</div>';
+
+        if (Object.keys(data.other_headers).length > 0) {
+          headersHtml += '<h3>📋 All Headers</h3><div class="all-headers">';
+          for (const [key, value] of Object.entries(data.other_headers)) {
+            const displayValue = value.length > 200 ? value.substring(0, 200) + '...' : value;
+            headersHtml += `<div class="header-item"><strong>${key}:</strong><span class="header-value">${escapeHtml(displayValue)}</span></div>`;
+          }
+          headersHtml += '</div>';
+        }
+
+        document.getElementById('preview-headers-container').innerHTML = headersHtml;
+
+        // Render body
+        let bodyHtml = '';
+        if (data.is_html) {
+          bodyHtml = `<div id="html-preview">${data.body_rendered}</div>`;
+        } else {
+          bodyHtml = `<div id="preview-body-text">${escapeHtml(data.body)}</div>`;
+        }
+        document.getElementById('preview-body-container').innerHTML = bodyHtml;
+
+        // Raw code
+        document.getElementById('code-display').textContent = data.raw_content;
+
+        // Initialize tab switching
+        initializeTabs();
+      }
+
+      function escapeHtml(text) {
+        const map = {
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#039;'
+        };
+        return text.replace(/[&<>"']/g, m => map[m]);
+      }
+
+      function initializeTabs() {
+        const tabBtns = document.querySelectorAll('.tab-btn');
+        const tabContents = document.querySelectorAll('.tab-content');
+        
+        tabBtns.forEach(btn => {
+          // Remove existing listeners
+          btn.replaceWith(btn.cloneNode(true));
+        });
+
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+          btn.addEventListener('click', function() {
+            const tabName = this.dataset.tab;
+            
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            
+            document.querySelectorAll('.tab-content').forEach(content => {
+              content.style.display = 'none';
+            });
+            document.getElementById(tabName + '-tab').style.display = 'block';
+          });
+        });
+      }
+
+      fileInput.addEventListener('change', (e) => {
+        if (e.target.files[0]) {
+          uploadFile(e.target.files[0]);
+        }
+      });
+
+      dropZone.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        if (files[0]) {
+          uploadFile(files[0]);
+        }
+      });
+    }
+
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', initializeApp);
+  </script>
+</body>
+</html>

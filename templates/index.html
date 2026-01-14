@@ -2,231 +2,897 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Email Metadata Reader</title>
+  <title>Dockerized EML Inspector</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="static/index.css">
-</head>
-<body>
-  <h1>EML File Reader</h1>
-  <p>Drag & drop a <code>.eml</code> file below to view its raw code and visual rendering.</p>
 
-  <form id="upload-form" enctype="multipart/form-data">
-    <div id="drop-zone">
-      <strong>Drop .eml file here</strong><br>
-      <span>or click to browse</span>
-      <input id="file-input" type="file" name="file" accept=".eml,message/rfc822" required>
-    </div>
-  </form>
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;700;800&display=swap" rel="stylesheet">
 
-  <div id="status"></div>
-  <div id="error"></div>
-  <div id="loading" style="display:none; text-align: center; margin-top: 1rem;">
-    <div style="display: inline-block;">
-      <div style="border: 4px solid #f3f3f3; border-top: 4px solid #007bff; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite;"></div>
-      <p style="margin-top: 0.5rem; color: #555;">Processing email...</p>
-    </div>
-  </div>
+  <!-- Prism theme + line numbers plugin (for raw code view) -->
+  <link href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/line-numbers/prism-line-numbers.min.css" rel="stylesheet" />
+
   <style>
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
+    /* --- 1. DESIGN TOKENS & RESET --- */
+    :root {
+      --primary: #4f46e5;
+      --primary-glow: #818cf8;
+      --secondary: #0f172a;
+      --accent: #38bdf8;
+
+      --bg-body: #f8fafc;
+      --bg-glass: rgba(255, 255, 255, 0.7);
+      --bg-card: #ffffff;
+
+      --text-main: #1e293b;
+      --text-muted: #64748b;
+
+      --font-h1: clamp(2.2rem, 4vw, 3.2rem);
+
+      --container-width: 1200px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-full: 9999px;
+      --shadow-soft: 0 10px 40px -10px rgba(0,0,0,0.08);
+      --shadow-hover: 0 20px 40px -10px rgba(79, 70, 229, 0.15);
+      --transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg-body);
+      color: var(--text-main);
+      overflow-x: hidden;
+      background-image:
+        radial-gradient(at 0% 0%, rgba(79, 70, 229, 0.05) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(56, 189, 248, 0.08) 0px, transparent 50%);
+      background-attachment: fixed;
+    }
+
+    h1, h2, h3, .brand {
+      font-family: 'Outfit', sans-serif;
+    }
+
+    a { text-decoration: none; color: inherit; }
+
+    /* --- 2. UTILITIES --- */
+    .container {
+      max-width: var(--container-width);
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    .fade-in-up {
+      animation: fadeInUp 0.8s ease-out forwards;
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    .delay-1 { animation-delay: 0.1s; }
+    .delay-2 { animation-delay: 0.2s; }
+    .delay-3 { animation-delay: 0.3s; }
+
+    @keyframes fadeInUp {
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: var(--radius-full);
+      font-size: 0.75rem;
+      background: rgba(79, 70, 229, 0.08);
+      color: var(--primary);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* --- 3. BUTTONS --- */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 22px;
+      font-weight: 600;
+      border-radius: var(--radius-full);
+      transition: var(--transition);
+      cursor: pointer;
+      font-size: 0.95rem;
+      position: relative;
+      overflow: hidden;
+      border: none;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 4px 15px rgba(79, 70, 229, 0.3);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 25px rgba(79, 70, 229, 0.5);
+    }
+
+    .btn-primary::after {
+      content: '';
+      position: absolute;
+      top: 0; left: -100%;
+      width: 100%; height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+      transition: 0.5s;
+    }
+    .btn-primary:hover::after {
+      left: 100%;
+    }
+
+    /* --- 4. NAVIGATION --- */
+    header {
+      position: fixed;
+      top: 0; left: 0; width: 100%;
+      z-index: 100;
+      background: var(--bg-glass);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255,255,255,0.3);
+    }
+
+    nav {
+      height: 72px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .brand {
+      font-size: 1.4rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-dot {
+      width: 12px; height: 12px;
+      background: var(--primary);
+      border-radius: 50%;
+      box-shadow: 0 0 10px var(--primary-glow);
+    }
+
+    .nav-menu {
+      display: flex;
+      gap: 24px;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+
+    .nav-link {
+      font-weight: 500;
+      color: var(--text-muted);
+      position: relative;
+    }
+    .nav-link:hover { color: var(--primary); }
+    .nav-link::after {
+      content: '';
+      position: absolute;
+      width: 0; height: 2px;
+      bottom: -4px; left: 0;
+      background: var(--primary);
+      transition: 0.3s;
+    }
+    .nav-link:hover::after { width: 100%; }
+
+    /* --- 5. HERO SECTION --- */
+    .hero {
+      padding-top: 140px;
+      padding-bottom: 80px;
+      position: relative;
+    }
+
+    .blob {
+      position: absolute;
+      width: 400px; height: 400px;
+      background: var(--primary-glow);
+      filter: blur(80px);
+      opacity: 0.15;
+      border-radius: 50%;
+      z-index: -1;
+    }
+    .blob-1 { top: -80px; left: -80px; }
+    .blob-2 { bottom: 0; right: -100px; background: var(--accent); }
+
+    .hero-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.2fr);
+      gap: 40px;
+      align-items: center;
+    }
+
+    @media (max-width: 900px) {
+      .hero-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .hero-title {
+      font-size: var(--font-h1);
+      line-height: 1.1;
+      letter-spacing: -0.04em;
+      margin-bottom: 18px;
+    }
+
+    .gradient-text {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-subtitle {
+      font-size: 1.05rem;
+      color: var(--text-muted);
+      max-width: 520px;
+      line-height: 1.7;
+      margin-bottom: 20px;
+    }
+
+    .hero-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .hero-meta span {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .hero-meta svg {
+      width: 16px;
+      height: 16px;
+      color: var(--primary);
+    }
+
+    /* Dashboard-style card for upload + status */
+    .dashboard-preview {
+      background: var(--bg-card);
+      border-radius: var(--radius-lg);
+      box-shadow:
+        0 0 0 1px rgba(0,0,0,0.05),
+        0 30px 60px -15px rgba(0,0,0,0.15);
+      padding: 18px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .dashboard-frame {
+      background: #f1f5f9;
+      border-radius: 10px;
+      padding: 20px;
+      border: 1px dashed #cbd5e1;
+    }
+
+    .upload-label {
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    #drop-zone {
+      border-radius: 12px;
+      padding: 28px;
+      text-align: center;
+      border: 2px dashed #cbd5e1;
+      background: white;
+      transition: var(--transition);
+      cursor: pointer;
+    }
+
+    #drop-zone strong {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+
+    #drop-zone span {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    #drop-zone.highlight {
+      border-color: var(--primary);
+      background: #eef2ff;
+      box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.1);
+    }
+
+    #file-input {
+      display: none;
+    }
+
+    #status {
+      margin-top: 12px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    #error {
+      margin-top: 8px;
+      font-size: 0.85rem;
+      color: #b91c1c;
+    }
+
+    /* --- 6. RESULTS SECTION --- */
+    .results-section {
+      padding: 40px 0 60px;
+    }
+
+    .results-header {
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .results-header h2 {
+      font-size: 1.4rem;
+      margin-bottom: 4px;
+    }
+
+    .results-header p {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    /* Tab buttons */
+    .tabs {
+      display: inline-flex;
+      border-radius: var(--radius-full);
+      background: #e5e7eb;
+      padding: 3px;
+      gap: 2px;
+    }
+
+    .tab-btn {
+      border: none;
+      background: transparent;
+      padding: 6px 14px;
+      border-radius: var(--radius-full);
+      font-size: 0.85rem;
+      cursor: pointer;
+      color: #4b5563;
+      font-weight: 500;
+      transition: var(--transition);
+    }
+
+    .tab-btn.active {
+      background: white;
+      color: var(--primary);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+
+    .results-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr);
+      gap: 24px;
+      align-items: flex-start;
+    }
+
+    @media (max-width: 900px) {
+      .results-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card-block {
+      background: var(--bg-card);
+      border-radius: var(--radius-lg);
+      padding: 20px 22px;
+      box-shadow: var(--shadow-soft);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+
+    .card-block h3 {
+      font-size: 1rem;
+      margin-bottom: 12px;
+    }
+
+    .headers-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 8px;
+      font-size: 0.88rem;
+    }
+
+    .header-item strong {
+      display: block;
+      font-weight: 600;
+      color: #0f172a;
+    }
+
+    .header-item span {
+      color: var(--text-muted);
+      word-break: break-word;
+    }
+
+    .attachments-list {
+      margin-top: 16px;
+      font-size: 0.85rem;
+    }
+
+    .attachments-list ul {
+      list-style: none;
+      padding-left: 0;
+      margin: 8px 0 0;
+    }
+
+    .attachments-list li {
+      margin-bottom: 4px;
+    }
+
+    .attachments-list a {
+      color: var(--primary);
+      font-weight: 500;
+    }
+
+    .attachments-list small {
+      color: var(--text-muted);
+    }
+
+    .email-body {
+      font-size: 0.9rem;
+      max-height: 480px;
+      overflow: auto;
+      border-radius: var(--radius-md);
+      border: 1px solid #e2e8f0;
+      padding: 14px;
+      background: #f8fafc;
+    }
+
+    .email-body pre {
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    .code-container {
+      margin-top: 16px;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      border: 1px solid #e2e8f0;
+    }
+
+    #code-tab {
+      margin-top: 12px;
+    }
+
+    /* --- PREMIUM SECTION --- */
+    .premium-section {
+      padding: 40px 0 80px;
+    }
+
+    .premium-card {
+      background: #fef3c7; /* soft amber */
+      border-radius: 24px;
+      padding: 32px 36px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+      gap: 32px;
+      align-items: center;
+      box-shadow: 0 20px 40px -15px rgba(0,0,0,0.15);
+      position: relative;
+      overflow: hidden;
+    }
+
+    @media (max-width: 900px) {
+      .premium-card {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .premium-heading {
+      font-size: 1.6rem;
+      margin-bottom: 12px;
+    }
+
+    .premium-sub {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      margin-bottom: 18px;
+    }
+
+    .premium-list {
+      list-style: none;
+      padding-left: 0;
+      margin: 0 0 20px;
+    }
+
+    .premium-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      font-size: 0.9rem;
+      margin-bottom: 10px;
+      color: var(--text-main);
+    }
+
+    .premium-check {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      background: #22c55e;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: white;
+      font-size: 12px;
+    }
+
+    .btn-premium {
+      background: #fbbf24;
+      color: #78350f;
+      box-shadow: 0 10px 25px rgba(250, 204, 21, 0.6);
+    }
+
+    .btn-premium:hover {
+      background: #f59e0b;
+      color: #451a03;
+    }
+
+    .premium-visual {
+      position: relative;
+      justify-self: center;
+    }
+
+    .premium-doc {
+      width: 260px;
+      height: 180px;
+      border-radius: 18px;
+      background: white;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.18);
+      padding: 18px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .premium-tag {
+      position: absolute;
+      bottom: -18px;
+      right: -6px;
+      width: 120px;
+      height: 70px;
+      border-radius: 18px;
+      background: #fee2e2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      color: #b91c1c;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+      text-align: center;
+    }
+
+    .premium-crown {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: #facc15;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+    }
+
+    /* Footer */
+    footer {
+      padding: 40px 0;
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      border-top: 1px solid #e2e8f0;
+      background: white;
     }
   </style>
+</head>
+<body>
 
-  <div id="results-container" style="display:none;">
-    <div id="tabs">
-      <button class="tab-btn active" data-tab="preview">Preview</button>
-      <button class="tab-btn" data-tab="code">Raw Code</button>
+<header>
+  <div class="container">
+    <nav>
+      <a href="/" class="brand">
+        <span class="brand-dot"></span>
+        Dockerized EML Inspector
+      </a>
+      <div class="nav-menu">
+        <a href="#upload" class="nav-link">Upload</a>
+        {% if result %}
+          <a href="#results" class="nav-link">Results</a>
+        {% endif %}
+      </div>
+    </nav>
+  </div>
+</header>
+
+<section class="hero" id="upload">
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+
+  <div class="container">
+    <div class="hero-layout">
+      <!-- Left: Text -->
+      <div class="fade-in-up">
+        <div class="badge-pill">
+          <span>EML Forensics</span>
+          <span>Serverless-ready</span>
+        </div>
+        <h1 class="hero-title" style="margin-top:14px;">
+          Inspect emails<br>
+          <span class="gradient-text">without leaving your browser.</span>
+        </h1>
+        <p class="hero-subtitle">
+          Drag &amp; drop an <code>.eml</code> file to visualize headers, attachments, and content.
+          Perfect for quick forensic checks and phishing triage.
+        </p>
+
+        <div class="hero-meta">
+          <span>
+            <!-- check icon -->
+            <svg viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Runs as a containerized Flask service.
+          </span>
+          <span>
+            <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Analyze email structure in seconds.
+          </span>
+        </div>
+      </div>
+
+      <!-- Right: Upload card -->
+      <div class="dashboard-preview fade-in-up delay-2">
+        <div class="dashboard-frame">
+          <div class="upload-label">Upload EML</div>
+          <form id="upload-form" method="POST" enctype="multipart/form-data" action="/upload">
+            <div id="drop-zone">
+              <strong>Drop .eml file here</strong>
+              <span>or click to browse from your device</span>
+              <input id="file-input" type="file" name="file" accept=".eml,message/rfc822" required>
+            </div>
+          </form>
+          <div id="status"></div>
+          <div id="error"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% if result %}
+<section class="results-section" id="results">
+  <div class="container">
+    <div class="results-header">
+      <div>
+        <h2>Analysis results</h2>
+        <p>Headers, attachments, and content extracted from the uploaded EML file.</p>
+      </div>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="preview-tab">Preview</button>
+        <button class="tab-btn" data-tab="code-tab">Raw Code</button>
+      </div>
     </div>
 
+    <!-- Preview / Code Tabs -->
     <div id="preview-tab" class="tab-content">
-      <div class="two-column">
-        <div class="left-column">
-          <h2>📧 Email Headers</h2>
-          <div id="preview-headers-container"></div>
+      <div class="results-layout">
+        <!-- Headers + attachments -->
+        <div class="card-block">
+          <h3>📧 Email headers</h3>
+          <div class="headers-grid">
+            {% for key, value in result.headers.items() %}
+              <div class="header-item">
+                <strong>{{ key.replace('-', ' ').title() }}:</strong>
+                <span>{{ value }}</span>
+              </div>
+            {% endfor %}
+          </div>
+
+          <div class="attachments-list">
+            <h3 style="font-size:0.9rem; margin-bottom:4px;">📎 Attachments</h3>
+            {% if result.attachments and result.attachments|length > 0 %}
+              <ul>
+                {% for a in result.attachments %}
+                  <li>
+                    {% if a.url %}
+                      <a href="{{ a.url }}" target="_blank" download>{{ a.filename }}</a>
+                    {% else %}
+                      <span>{{ a.filename }}</span>
+                    {% endif %}
+                    <small> — {{ a.size }} bytes</small>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <span style="color:var(--text-muted);">No attachments detected.</span>
+            {% endif %}
+          </div>
         </div>
-        <div class="right-column">
-          <h2>📨 Email Content</h2>
-          <div id="preview-body-container"></div>
+
+        <!-- Body -->
+        <div class="card-block">
+          <h3>📨 Email content</h3>
+          <div class="email-body">
+            {% if result.is_html %}
+              <div id="html-preview">
+                {{ result.body_rendered|safe }}
+              </div>
+            {% else %}
+              <pre id="preview-body-text">{{ result.body }}</pre>
+            {% endif %}
+          </div>
         </div>
       </div>
     </div>
 
     <div id="code-tab" class="tab-content" style="display:none;">
-      <pre id="code-display"></pre>
+      <div class="card-block">
+        <h3>Raw MIME source</h3>
+        <div class="code-container">
+          <pre id="code-display" class="line-numbers"><code class="language-markup">{{ result.raw_content }}</code></pre>
+        </div>
+      </div>
     </div>
   </div>
+</section>
+{% endif %}
 
-  <script>
-    function initializeApp() {
-      // Drag and drop functionality with AJAX upload
-      const dropZone = document.getElementById('drop-zone');
-      const fileInput = document.getElementById('file-input');
-      const uploadForm = document.getElementById('upload-form');
-      const statusEl = document.getElementById('status');
-      const errorEl = document.getElementById('error');
-      const loadingEl = document.getElementById('loading');
-      const resultsContainer = document.getElementById('results-container');
+<section class="premium-section">
+  <div class="container">
+    <div class="premium-card">
+      <!-- Left: text + perks -->
+      <div>
+        <h2 class="premium-heading">Get more with Premium</h2>
+        <p class="premium-sub">
+          Unlock advanced features to speed up investigations and streamline your email workflows.
+        </p>
 
-      function preventDefaults(e) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
+        <ul class="premium-list">
+          <li>
+            <span class="premium-check">✓</span>
+            <span>Get full access to work offline with the Desktop version.</span>
+          </li>
+          <li>
+            <span class="premium-check">✓</span>
+            <span>Unlimited email inspections plus secure cloud storage.</span>
+          </li>
+          <li>
+            <span class="premium-check">✓</span>
+            <span>Create custom workflows and integrate scans with VirusTotal.</span>
+          </li>
+        </ul>
 
-      ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-        dropZone.addEventListener(eventName, preventDefaults, false);
-      });
+        <button class="btn btn-premium" type="button">
+          Get Premium
+        </button>
+      </div>
 
-      ['dragenter', 'dragover'].forEach(eventName => {
-        dropZone.addEventListener(eventName, () => dropZone.classList.add('highlight'), false);
-      });
+      <!-- Right: visual placeholder -->
+      <div class="premium-visual">
+        <div class="premium-doc">
+          <strong style="display:block; margin-bottom:6px;">Forensic Report.pdf</strong>
+          <p style="margin-bottom:10px;">Summary of header anomalies, attachment hashes and link reputation.</p>
+          <div style="height:4px; background:#e5e7eb; border-radius:999px; margin-bottom:4px;"></div>
+          <div style="height:4px; background:#e5e7eb; border-radius:999px; width:70%; margin-bottom:4px;"></div>
+          <div style="height:4px; background:#e5e7eb; border-radius:999px; width:50%;"></div>
+        </div>
 
-      ['dragleave', 'drop'].forEach(eventName => {
-        dropZone.addEventListener(eventName, () => dropZone.classList.remove('highlight'), false);
-      });
+        <div class="premium-tag">
+          VirusTotal Scan<br>
+          <span style="font-weight:600;">Integrated</span>
+        </div>
 
-      dropZone.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        fileInput.click();
-      });
+        <div class="premium-crown">👑</div>
+      </div>
+    </div>
+  </div>
+</section>
 
-      fileInput.addEventListener('click', (e) => {
-        e.stopPropagation();
-      });
+<footer>
+  <div class="container">
+    <p>&copy; {{ 2026 }} Dockerized EML Inspector · Built for security analysis and Docker practice.</p>
+  </div>
+</footer>
 
-      async function uploadFile(file) {
-        if (!file.name.endsWith('.eml')) {
-          errorEl.textContent = 'Please upload a .eml file';
-          statusEl.textContent = '';
-          return;
-        }
+<!-- Prism JS -->
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/line-numbers/prism-line-numbers.min.js"></script>
 
-        statusEl.textContent = '';
-        errorEl.textContent = '';
-        loadingEl.style.display = 'block';
-        resultsContainer.style.display = 'none';
+<script>
+  // Drag & drop + auto-submit
+  const dropZone = document.getElementById("drop-zone");
+  const fileInput = document.getElementById("file-input");
+  const uploadForm = document.getElementById("upload-form");
+  const statusEl = document.getElementById("status");
+  const errorEl = document.getElementById("error");
 
-        const formData = new FormData();
-        formData.append('file', file);
+  function preventDefaults(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
 
-        try {
-          const response = await fetch('/upload-api', {
-            method: 'POST',
-            body: formData
-          });
+  ["dragenter", "dragover", "dragleave", "drop"].forEach(eventName => {
+    dropZone.addEventListener(eventName, preventDefaults, false);
+  });
 
-          if (!response.ok) {
-            throw new Error('Server error: ' + response.status);
-          }
+  ["dragenter", "dragover"].forEach(eventName => {
+    dropZone.addEventListener(eventName, () => dropZone.classList.add("highlight"), false);
+  });
 
-          const data = await response.json();
-          
-          if (data.error) {
-            errorEl.textContent = 'Error: ' + data.error;
-            loadingEl.style.display = 'none';
-            return;
-          }
+  ["dragleave", "drop"].forEach(eventName => {
+    dropZone.addEventListener(eventName, () => dropZone.classList.remove("highlight"), false);
+  });
 
-          // Populate the results
-          renderResults(data);
-          loadingEl.style.display = 'none';
-          resultsContainer.style.display = 'block';
-          statusEl.textContent = '';
-          errorEl.textContent = '';
-        } catch (err) {
-          loadingEl.style.display = 'none';
-          errorEl.textContent = 'Error uploading file: ' + err.message;
-        }
-      }
+  dropZone.addEventListener("click", () => fileInput.click());
 
-      function renderResults(data) {
-        // Render headers
-        let headersHtml = '<div class="headers-grid">';
-        for (const [key, value] of Object.entries(data.key_headers)) {
-          headersHtml += `<div class="header-item"><strong>${key}:</strong><span>${escapeHtml(value)}</span></div>`;
-        }
-        headersHtml += '</div>';
-
-        if (Object.keys(data.other_headers).length > 0) {
-          headersHtml += '<h3>📋 All Headers</h3><div class="all-headers">';
-          for (const [key, value] of Object.entries(data.other_headers)) {
-            const displayValue = value.length > 200 ? value.substring(0, 200) + '...' : value;
-            headersHtml += `<div class="header-item"><strong>${key}:</strong><span class="header-value">${escapeHtml(displayValue)}</span></div>`;
-          }
-          headersHtml += '</div>';
-        }
-
-        document.getElementById('preview-headers-container').innerHTML = headersHtml;
-
-        // Render body
-        let bodyHtml = '';
-        if (data.is_html) {
-          bodyHtml = `<div id="html-preview">${data.body_rendered}</div>`;
-        } else {
-          bodyHtml = `<div id="preview-body-text">${escapeHtml(data.body)}</div>`;
-        }
-        document.getElementById('preview-body-container').innerHTML = bodyHtml;
-
-        // Raw code
-        document.getElementById('code-display').textContent = data.raw_content;
-
-        // Initialize tab switching
-        initializeTabs();
-      }
-
-      function escapeHtml(text) {
-        const map = {
-          '&': '&amp;',
-          '<': '&lt;',
-          '>': '&gt;',
-          '"': '&quot;',
-          "'": '&#039;'
-        };
-        return text.replace(/[&<>"']/g, m => map[m]);
-      }
-
-      function initializeTabs() {
-        const tabBtns = document.querySelectorAll('.tab-btn');
-        const tabContents = document.querySelectorAll('.tab-content');
-        
-        tabBtns.forEach(btn => {
-          // Remove existing listeners
-          btn.replaceWith(btn.cloneNode(true));
-        });
-
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-          btn.addEventListener('click', function() {
-            const tabName = this.dataset.tab;
-            
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            this.classList.add('active');
-            
-            document.querySelectorAll('.tab-content').forEach(content => {
-              content.style.display = 'none';
-            });
-            document.getElementById(tabName + '-tab').style.display = 'block';
-          });
-        });
-      }
-
-      fileInput.addEventListener('change', (e) => {
-        if (e.target.files[0]) {
-          uploadFile(e.target.files[0]);
-        }
-      });
-
-      dropZone.addEventListener('drop', (e) => {
-        const dt = e.dataTransfer;
-        const files = dt.files;
-        if (files[0]) {
-          uploadFile(files[0]);
-        }
-      });
+  fileInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      errorEl.textContent = "";
+      statusEl.textContent = "Uploading and analyzing…";
+      uploadForm.submit();
     }
+  });
 
-    // Initialize on page load
-    document.addEventListener('DOMContentLoaded', initializeApp);
-  </script>
+  dropZone.addEventListener("drop", (e) => {
+    const dt = e.dataTransfer;
+    const file = dt.files[0];
+    if (file) {
+      fileInput.files = dt.files;
+      errorEl.textContent = "";
+      statusEl.textContent = "Uploading and analyzing…";
+      uploadForm.submit();
+    }
+  });
+
+  // Tabs logic (only active when result exists)
+  const tabButtons = document.querySelectorAll(".tab-btn");
+  const previewTab = document.getElementById("preview-tab");
+  const codeTab = document.getElementById("code-tab");
+
+  const tabContents = {
+    "preview-tab": previewTab,
+    "code-tab": codeTab
+  };
+
+  tabButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const target = btn.getAttribute("data-tab");
+
+      tabButtons.forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+
+      Object.keys(tabContents).forEach(key => {
+        if (!tabContents[key]) return;
+        tabContents[key].style.display = (key === target) ? "block" : "none";
+      });
+    });
+  });
+</script>
+
 </body>
 </html>

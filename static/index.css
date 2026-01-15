@@ -970,9 +970,10 @@ nav {
   color: #6b7280;
 }
 
-/* --- PREMIUM SECTION --- */
+/* --- PREMIUM SECTION (hidden for now) --- */
 .premium-section {
   padding: 40px 0 80px;
+  display: none; /* keep markup, hide visually */
 }
 
 .premium-card {

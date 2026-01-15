@@ -107,11 +107,7 @@
             <div id="drop-zone">
               <strong>Drop .eml file or .zip here</strong>
               <span>
-                {% if current_user.is_authenticated %}
-                  or click to browse from your device
-                {% else %}
-                  or click to browse – you’ll be prompted to sign in first
-                {% endif %}
+                or click to browse from your device
               </span>
               <small>ZIP mode: we’ll parse each <code>.eml</code> inside and show a batch overview.</small>
               <input id="file-input" type="file" name="file" accept=".eml,.zip,message/rfc822" required>
@@ -181,7 +177,7 @@
         <p>Headers, attachments, and content extracted from the uploaded EML file.</p>
       </div>
       <div class="results-header-right">
-        <!-- Risk badge removed here – risk is now shown inside Insights -->
+        <!-- Risk badge removed here – we show risk inside Insights -->
         <div class="tabs">
           <button class="tab-btn active" data-tab="preview-tab">Preview</button>
           <button class="tab-btn" data-tab="code-tab">Raw Code</button>
@@ -658,7 +654,7 @@
       });
     }
 
-    // Drag & drop helpers
+    // Drag & drop helpers (NO login requirement for now)
     if (dropZone && uploadForm) {
       function preventDefaults(e) {
         e.preventDefault();
@@ -677,41 +673,27 @@
         dropZone.addEventListener(eventName, () => dropZone.classList.remove("highlight"), false);
       });
 
+      // Click always opens file picker
       dropZone.addEventListener("click", () => {
-        if (IS_AUTHENTICATED) {
-          fileInput.click();
-        } else {
-          setAuthMode("signup"); // default to signup when clicking the box
-          openAuthModal();
-        }
+        fileInput.click();
       });
 
+      // Drop directly submits
       dropZone.addEventListener("drop", (e) => {
         const dt = e.dataTransfer;
         const file = dt.files[0];
         if (!file) return;
 
-        if (IS_AUTHENTICATED) {
-          fileInput.files = dt.files;
-          if (errorEl) errorEl.textContent = "";
-          if (statusEl) statusEl.textContent = "Uploading and analyzing…";
-          uploadForm.submit();
-        } else {
-          setAuthMode("signup");
-          openAuthModal();
-        }
+        fileInput.files = dt.files;
+        if (errorEl) errorEl.textContent = "";
+        if (statusEl) statusEl.textContent = "Uploading and analyzing…";
+        uploadForm.submit();
       });
 
+      // File picker change
       fileInput.addEventListener("change", (e) => {
         const file = e.target.files[0];
         if (!file) return;
-
-        if (!IS_AUTHENTICATED) {
-          e.target.value = "";
-          setAuthMode("signup");
-          openAuthModal();
-          return;
-        }
 
         if (errorEl) errorEl.textContent = "";
         if (statusEl) statusEl.textContent = "Uploading and analyzing…";

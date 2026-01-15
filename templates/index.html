@@ -31,12 +31,6 @@
         {% if result or batch_results %}
           <a href="#results" class="nav-link">Results</a>
         {% endif %}
-        {% if current_user.is_authenticated %}
-          <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
-        {% else %}
-          <a href="#" class="nav-link" id="nav-signin">Sign in</a>
-          <a href="{{ url_for('dev_login') }}" class="nav-link" style="color:#f97316;">Dev bypass</a>
-        {% endif %}
       </div>
     </nav>
   </div>
@@ -52,15 +46,17 @@
       <div class="fade-in-up">
         <div class="badge-pill">
           <span>EML Forensics</span>
-          <span>Serverless-ready</span>
+          <span>Docker-ready</span>
         </div>
+
         <h1 class="hero-title hero-title-margin">
           Inspect emails<br>
           <span class="gradient-text">without leaving your browser.</span>
         </h1>
+
         <p class="hero-subtitle">
-          Drag &amp; drop one <code>.eml</code> file or a <code>.zip</code> of EMLs to visualize headers,
-          attachments, and content. Perfect for quick forensic checks and phishing triage.
+          Drag &amp; drop a single <code>.eml</code> file or a <code>.zip</code> with multiple EMLs to visualize headers,
+          links, attachments, and risk hints. Designed for quick phishing triage and Docker experiments.
         </p>
 
         <div class="hero-meta">
@@ -87,16 +83,27 @@
             <div class="stat-hint">Across uploaded EML files</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">Users signed up</div>
-            <div class="stat-value">{{ users_signed_up or 0 }}</div>
-            <div class="stat-hint">Analysts using this tool</div>
-          </div>
-          <div class="stat-card">
             <div class="stat-label">High-risk flagged</div>
             <div class="stat-value">{{ suspicious_flagged or 0 }}</div>
             <div class="stat-hint">Based on headers, links &amp; attachments</div>
           </div>
+          <div class="stat-card">
+            <div class="stat-label">Batch uploads</div>
+            <div class="stat-value">ZIP</div>
+            <div class="stat-hint">Per-file breakdown &amp; reports</div>
+          </div>
         </div>
+
+        <!-- Flash messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="flash-container">
+              {% for category, message in messages %}
+                <div class="flash-message">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
       </div>
 
       <!-- Right: Upload card -->
@@ -106,14 +113,8 @@
           <form id="upload-form" method="POST" enctype="multipart/form-data" action="{{ url_for('upload') }}">
             <div id="drop-zone">
               <strong>Drop .eml file or .zip here</strong>
-              <span>
-                {% if current_user.is_authenticated %}
-                  or click to browse from your device
-                {% else %}
-                  or click to browse – you’ll be prompted to sign in first
-                {% endif %}
-              </span>
-              <small>ZIP mode: we’ll parse each <code>.eml</code> inside and show a batch overview.</small>
+              <span>or click to browse from your device</span>
+              <small>In ZIP mode, every <code>.eml</code> is parsed and listed in the batch results table.</small>
               <input id="file-input" type="file" name="file" accept=".eml,.zip,message/rfc822" required>
             </div>
           </form>
@@ -142,6 +143,7 @@
       </div>
       {% endif %}
     </div>
+
     <div class="card-block">
       <table class="batch-table">
         <thead>
@@ -157,7 +159,15 @@
         <tbody>
           {% for row in batch_results %}
             <tr>
-              <td>{{ row.file_name }}</td>
+              <td>
+                {% if row.index is not none %}
+                  <a class="batch-link" href="{{ url_for('view_batch_email', batch_id=batch_id, index=row.index) }}">
+                    {{ row.file_name }}
+                  </a>
+                {% else %}
+                  {{ row.file_name }}
+                {% endif %}
+              </td>
               <td>{{ row.from_email }}</td>
               <td>{{ row.subject }}</td>
               <td>{{ row.attachments_count }}</td>
@@ -181,7 +191,6 @@
         <p>Headers, attachments, and content extracted from the uploaded EML file.</p>
       </div>
       <div class="results-header-right">
-        <!-- Risk badge removed here – risk is now shown inside Insights -->
         <div class="tabs">
           <button class="tab-btn active" data-tab="preview-tab">Preview</button>
           <button class="tab-btn" data-tab="code-tab">Raw Code</button>
@@ -190,14 +199,12 @@
     </div>
 
     <div id="preview-tab" class="tab-content">
-      <!-- SINGLE-COLUMN RESULTS LAYOUT -->
       <div class="results-layout">
 
-        <!-- 1. Insights (risk + SPF/DKIM/DMARC + links + reasons) -->
+        <!-- 1. Insights -->
         <div class="card-block">
           <h3>💡 Insights</h3>
           <div class="insights-block">
-            <!-- Risk line -->
             {% if result.risk_level or result.risk_score is not none %}
             <div class="insights-risk-line">
               {% if result.risk_level %}
@@ -213,7 +220,6 @@
             </div>
             {% endif %}
 
-            <!-- SPF / DKIM / DMARC -->
             {% set auth = result.header_summary.auth %}
             <div class="insights-auth-row">
               <span class="insights-auth-label">Authentication:</span>
@@ -221,14 +227,11 @@
                 {% for mech in ['spf', 'dkim', 'dmarc'] %}
                   {% set val = auth[mech] if auth and mech in auth else 'missing' %}
                   {% set cls = 'auth-chip ' + ('pass' if val=='pass' else ('fail' if val in ['fail','softfail'] else 'missing')) %}
-                  <div class="{{ cls }}">
-                    {{ mech.upper() }}: {{ val }}
-                  </div>
+                  <div class="{{ cls }}">{{ mech.upper() }}: {{ val }}</div>
                 {% endfor %}
               </div>
             </div>
 
-            <!-- Links summary + pills -->
             <div class="insights-links-block">
               {% if result.links and result.links|length > 0 %}
                 <div class="indicators-intro">
@@ -247,9 +250,7 @@
                       {% elif link.is_suspicious_tld %}
                         <span>· Suspicious TLD {{ link.tld }}</span>
                       {% endif %}
-                      <span class="indicator-url">
-                        {{ link.url }}
-                      </span>
+                      <span class="indicator-url">{{ link.url }}</span>
                     </div>
                   {% endfor %}
                 </div>
@@ -260,7 +261,6 @@
               {% endif %}
             </div>
 
-            <!-- Risk reasons / signals -->
             {% if result.risk_reasons and result.risk_reasons|length > 0 %}
               <ul class="insights-list">
                 {% for reason in result.risk_reasons %}
@@ -278,7 +278,6 @@
         <!-- 2. Email overview -->
         <div class="card-block">
           <h3>📧 Email overview</h3>
-
           <div class="header-summary">
             <div class="header-summary-row">
               <span class="header-summary-label">From:</span>
@@ -341,7 +340,7 @@
 
         <!-- 5. Attachments & forensic hashes -->
         <div class="card-block">
-          <h3>📎 Attachments & forensic hashes</h3>
+          <h3>📎 Attachments &amp; forensic hashes</h3>
 
           <div class="attachments-list">
             {% if result.attachments and result.attachments|length > 0 %}
@@ -349,12 +348,6 @@
                 <span class="attachments-count">
                   {{ result.attachments|length }} attachment{{ '' if result.attachments|length == 1 else 's' }}
                 </span>
-                {% if result.request_id is defined %}
-                  <a class="attachments-download-all"
-                     href="{{ url_for('download_attachments', req_id=result.request_id) }}">
-                    ⬇ Download all (.zip)
-                  </a>
-                {% endif %}
               </div>
 
               <ul>
@@ -393,6 +386,16 @@
                   </li>
                 {% endfor %}
               </ul>
+
+              {% if result.request_id is defined %}
+                <div class="attachments-download-all-row">
+                  <a class="attachments-download-all"
+                     href="{{ url_for('download_attachments', req_id=result.request_id) }}">
+                    <span class="download-all-icon-circle">⬇</span>
+                    <span>Download all attachments (.zip)</span>
+                  </a>
+                </div>
+              {% endif %}
             {% else %}
               <span class="muted-text">No attachments detected.</span>
             {% endif %}
@@ -436,155 +439,6 @@
 </section>
 {% endif %}
 
-<section class="premium-section">
-  <div class="container">
-    <div class="premium-card">
-      <!-- Left: text + perks -->
-      <div>
-        <h2 class="premium-heading">Get more with Premium</h2>
-        <p class="premium-sub">
-          Unlock advanced features to speed up investigations and streamline your email workflows.
-        </p>
-
-        <ul class="premium-list">
-          <li>
-            <span class="premium-check">✓</span>
-            <span>Get full access to work offline with the Desktop version.</span>
-          </li>
-          <li>
-            <span class="premium-check">✓</span>
-            <span>Unlimited email inspections plus secure cloud storage.</span>
-          </li>
-          <li>
-            <span class="premium-check">✓</span>
-            <span>Create custom workflows and integrate scans with VirusTotal.</span>
-          </li>
-        </ul>
-
-        <button class="btn btn-premium" type="button">
-          Get Premium
-        </button>
-      </div>
-
-      <!-- Right: visual placeholder -->
-      <div class="premium-visual">
-        <div class="premium-doc">
-          <strong class="premium-doc-title">Forensic Report.pdf</strong>
-          <p class="premium-doc-text">
-            Summary of header anomalies, attachment hashes and link reputation.
-          </p>
-          <div class="premium-doc-line"></div>
-          <div class="premium-doc-line premium-doc-line-2"></div>
-          <div class="premium-doc-line premium-doc-line-3"></div>
-        </div>
-
-        <div class="premium-tag">
-          VirusTotal Scan<br>
-          <span class="premium-tag-bold">Integrated</span>
-        </div>
-
-        <div class="premium-crown">👑</div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Auth Modal (center glass window) -->
-<div id="auth-modal" class="auth-modal">
-  <div class="auth-modal-backdrop"></div>
-  <div class="auth-modal-content">
-    <button type="button" class="auth-modal-close" id="auth-modal-close" aria-label="Close">
-      ×
-    </button>
-
-    <div class="badge-pill auth-badge">
-      <span>Account</span>
-    </div>
-
-    <h2>Access your EML workspace</h2>
-    <p>Create an account or sign in to upload and analyze EML files.</p>
-
-    <!-- Flash messages -->
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        <div class="auth-flashes">
-          {% for category, message in messages %}
-            <div class="auth-flash">{{ message }}</div>
-          {% endfor %}
-        </div>
-      {% endif %}
-    {% endwith %}
-
-    <!-- Toggle between Sign in / Create account -->
-    <div class="auth-toggle">
-      <button type="button" class="auth-toggle-btn active" data-mode="login">Sign in</button>
-      <button type="button" class="auth-toggle-btn" data-mode="signup">Create account</button>
-    </div>
-
-    <div class="auth-modal-label">Continue with</div>
-    <div class="social-row">
-      <!-- Google -->
-      <button type="button" class="social-btn" onclick="window.location='{{ url_for('auth_google') }}'">
-        <span class="social-icon google">
-          <svg viewBox="0 0 48 48" width="18" height="18">
-            <path fill="#EA4335" d="M24 9.5c3.54 0 6 1.54 7.38 2.84l5.42-5.3C33.64 4.18 29.3 2 24 2 14.96 2 7.51 7.45 4.55 15.01l6.63 5.15C12.65 14.6 17.77 9.5 24 9.5z"/>
-            <path fill="#4285F4" d="M46.5 24.5c0-1.62-.15-3.18-.44-4.68H24v9.02h12.7c-.55 2.9-2.23 5.36-4.74 7.01l7.64 5.93C43.8 37.86 46.5 31.68 46.5 24.5z"/>
-            <path fill="#FBBC05" d="M11.18 28.84C10.36 26.54 9.9 24.07 9.9 21.5c0-2.57.46-5.04 1.28-7.34l-6.63-5.15C2.33 12.08 1 16.36 1 21.5c0 5.01 1.29 9.71 3.55 13.83l6.63-5.15z"/>
-            <path fill="#34A853" d="M24 47c6.3 0 11.59-2.07 15.45-5.67l-7.64-5.93C29.26 36.63 26.83 37.5 24 37.5c-6.23 0-11.35-5.1-12.82-11.81l-6.63 5.15C7.51 40.55 14.96 47 24 47z"/>
-          </svg>
-        </span>
-        <span class="social-label">Continue with Google</span>
-      </button>
-
-      <!-- Apple -->
-      <button type="button" class="social-btn" onclick="window.location='{{ url_for('auth_apple') }}'">
-        <span class="social-icon apple">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
-            <path d="M17.53 12.62c.01 2.65 2.31 3.53 2.33 3.53-.02.06-.37 1.28-1.23 2.53-.74 1.08-1.51 2.16-2.73 2.18-1.19.02-1.57-.71-2.93-.71s-1.78.69-2.9.73c-1.16.04-2.05-1.17-2.8-2.25-1.53-2.23-2.7-6.31-1.13-9.07.77-1.34 2.15-2.19 3.65-2.22 1.14-.02 2.22.76 2.93.76.71 0 2.02-.94 3.41-.8.58.02 2.21.24 3.25 1.82-.08.05-1.94 1.13-1.9 3.5zM14.97 5.23c.62-.75 1.04-1.79.92-2.83-.89.04-1.98.59-2.62 1.34-.57.66-1.08 1.72-.95 2.74 1.02.08 2.03-.52 2.65-1.25z"/>
-          </svg>
-        </span>
-        <span class="social-label">Continue with Apple</span>
-      </button>
-    </div>
-
-    <div class="auth-divider">or with email</div>
-
-    <!-- Email LOGIN form -->
-    <div id="auth-email-login" class="auth-email-form">
-      <form method="POST" action="{{ url_for('login') }}">
-        <div class="auth-input-group">
-          <label for="login-email">Email</label>
-          <input id="login-email" type="email" name="email" required>
-        </div>
-        <div class="auth-input-group">
-          <label for="login-password">Password</label>
-          <input id="login-password" type="password" name="password" required>
-        </div>
-        <button type="submit" class="btn btn-primary auth-submit">
-          Sign in with email
-        </button>
-      </form>
-    </div>
-
-    <!-- Email SIGNUP form -->
-    <div id="auth-email-signup" class="auth-email-form" style="display:none;">
-      <form method="POST" action="{{ url_for('signup') }}">
-        <div class="auth-input-group">
-          <label for="signup-email">Email</label>
-          <input id="signup-email" type="email" name="email" required>
-        </div>
-        <div class="auth-input-group">
-          <label for="signup-password">Password</label>
-          <input id="signup-password" type="password" name="password" required>
-        </div>
-        <button type="submit" class="btn btn-primary auth-submit">
-          Create account with email
-        </button>
-      </form>
-    </div>
-  </div>
-</div>
-
 <footer>
   <div class="container">
     <p>&copy; 2026 Dockerized EML Inspector · Built for security analysis and Docker practice.</p>
@@ -595,13 +449,6 @@
 <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/line-numbers/prism-line-numbers.min.js"></script>
 
-<!-- Auth flags from Flask -->
-<script>
-  const IS_AUTHENTICATED_STRING = "{{ 'true' if current_user.is_authenticated else 'false' }}";
-  const IS_AUTHENTICATED = IS_AUTHENTICATED_STRING === "true";
-  const AUTH_MODE = "{{ auth_mode or '' }}";  // "login", "signup", or ""
-</script>
-
 <script>
   document.addEventListener("DOMContentLoaded", () => {
     const dropZone   = document.getElementById("drop-zone");
@@ -610,55 +457,6 @@
     const statusEl   = document.getElementById("status");
     const errorEl    = document.getElementById("error");
 
-    const authModal      = document.getElementById("auth-modal");
-    const authModalClose = document.getElementById("auth-modal-close");
-    const authBackdrop   = authModal ? authModal.querySelector(".auth-modal-backdrop") : null;
-
-    const authToggleButtons = document.querySelectorAll(".auth-toggle-btn");
-    const loginFormBlock  = document.getElementById("auth-email-login");
-    const signupFormBlock = document.getElementById("auth-email-signup");
-    const navSignin       = document.getElementById("nav-signin");
-
-    function openAuthModal() {
-      if (authModal) authModal.style.display = "flex";
-    }
-
-    function closeAuthModal() {
-      if (authModal) authModal.style.display = "none";
-    }
-
-    function setAuthMode(mode) {
-      const m = mode === "signup" ? "signup" : "login";
-
-      authToggleButtons.forEach(btn => {
-        const btnMode = btn.getAttribute("data-mode");
-        if (btnMode === m) btn.classList.add("active");
-        else btn.classList.remove("active");
-      });
-
-      if (loginFormBlock && signupFormBlock) {
-        if (m === "signup") {
-          loginFormBlock.style.display  = "none";
-          signupFormBlock.style.display = "block";
-        } else {
-          loginFormBlock.style.display  = "block";
-          signupFormBlock.style.display = "none";
-        }
-      }
-    }
-
-    if (authModalClose) authModalClose.addEventListener("click", closeAuthModal);
-    if (authBackdrop)   authBackdrop.addEventListener("click", closeAuthModal);
-
-    if (navSignin) {
-      navSignin.addEventListener("click", (e) => {
-        e.preventDefault();
-        setAuthMode("login");
-        openAuthModal();
-      });
-    }
-
-    // Drag & drop helpers
     if (dropZone && uploadForm) {
       function preventDefaults(e) {
         e.preventDefault();
@@ -678,48 +476,29 @@
       });
 
       dropZone.addEventListener("click", () => {
-        if (IS_AUTHENTICATED) {
-          fileInput.click();
-        } else {
-          setAuthMode("signup"); // default to signup when clicking the box
-          openAuthModal();
-        }
+        fileInput.click();
       });
 
       dropZone.addEventListener("drop", (e) => {
         const dt = e.dataTransfer;
         const file = dt.files[0];
         if (!file) return;
-
-        if (IS_AUTHENTICATED) {
-          fileInput.files = dt.files;
-          if (errorEl) errorEl.textContent = "";
-          if (statusEl) statusEl.textContent = "Uploading and analyzing…";
-          uploadForm.submit();
-        } else {
-          setAuthMode("signup");
-          openAuthModal();
-        }
+        fileInput.files = dt.files;
+        if (errorEl) errorEl.textContent = "";
+        if (statusEl) statusEl.textContent = "Uploading and analyzing…";
+        uploadForm.submit();
       });
 
       fileInput.addEventListener("change", (e) => {
         const file = e.target.files[0];
         if (!file) return;
-
-        if (!IS_AUTHENTICATED) {
-          e.target.value = "";
-          setAuthMode("signup");
-          openAuthModal();
-          return;
-        }
-
         if (errorEl) errorEl.textContent = "";
         if (statusEl) statusEl.textContent = "Uploading and analyzing…";
         uploadForm.submit();
       });
     }
 
-    // Tabs for preview/raw code
+    // Tabs
     const tabButtons = document.querySelectorAll(".tab-btn");
     const previewTab = document.getElementById("preview-tab");
     const codeTab    = document.getElementById("code-tab");
@@ -742,13 +521,6 @@
           });
         });
       });
-    }
-
-    // Initialize auth mode based on ?auth= in URL (from /login or /signup redirects)
-    if (AUTH_MODE === "login" || AUTH_MODE === "signup") {
-      const initialMode = AUTH_MODE === "signup" ? "signup" : "login";
-      setAuthMode(initialMode);
-      openAuthModal();
     }
   });
 </script>

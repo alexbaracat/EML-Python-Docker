@@ -1,0 +1,22 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Local database (may contain user data)
+*.db
+*.sqlite
+
+# Secrets
+.env
+.env.*
+
+# Uploaded / extracted attachments
+static/attachments/*
+!static/attachments/.gitkeep
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

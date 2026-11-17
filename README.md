@@ -17,6 +17,18 @@
 
 **Dockerized EML Inspector** is a lightweight Flask web app that helps analysts and curious users triage suspicious emails. Upload a single `.eml` file or a ZIP full of them, and the app parses the message, checks its authentication headers, extracts links and attachments, and produces a **risk score with plain-English reasons**, all in the browser and packaged to run anywhere with Docker.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="Upload page of Dockerized EML Inspector" width="820" />
+</p>
+<p align="center"><em>Drag-and-drop upload for a single <code>.eml</code> or a ZIP batch.</em></p>
+
+<p align="center">
+  <img src="docs/screenshots/analysis.png" alt="Analysis results showing a high-risk phishing email" width="820" />
+</p>
+<p align="center"><em>Risk score, SPF/DKIM/DMARC status, link flags and the reasons behind the score (demo email with fictional domains).</em></p>
+
 ## Features
 
 - **Single or batch analysis**: upload one `.eml`, or a `.zip` and every `.eml` inside is analysed (macOS `__MACOSX` / `._` junk is skipped automatically).
@@ -115,7 +127,7 @@ EML-Python-Docker/
 - [ ] Persistent scan history
 - [ ] Optional VirusTotal API lookups
 - [ ] Export analysis reports (PDF / JSON)
-- [ ] Screenshots and a live demo
+- [ ] Live demo
 
 ## Author
 
